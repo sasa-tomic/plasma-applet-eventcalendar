@@ -46,7 +46,7 @@ ConfigPage {
 				var isPrimary = item.primary === true
 				var isShown = calendarIdList.indexOf(item.id) >= 0 || (isPrimary && calendarIdList.indexOf('primary') >= 0)
 				calendarsModel.append({
-					calendarId: item.id, 
+					calendarId: item.id,
 					name: item.summary,
 					description: item.description,
 					backgroundColor: item.backgroundColor,
@@ -67,7 +67,7 @@ ConfigPage {
 				// console.log(JSON.stringify(item))
 				var isShown = tasklistIdList.indexOf(item.id) >= 0
 				tasklistsModel.append({
-					tasklistId: item.id, 
+					tasklistId: item.id,
 					name: item.title,
 					description: '',
 					backgroundColor: Kirigami.Theme.highlightColor.toString(),
@@ -118,72 +118,24 @@ ConfigPage {
 			color: readableNegativeTextColor
 			wrapMode: Text.Wrap
 		}
-		LinkText {
+
+		Button {
 			Layout.fillWidth: true
-			text: i18n("Visit <a href=\"%1\">%2</a> (opens in your web browser). After you login and give permission to access your calendar, it will give you a code to paste below.", googleLoginManager.authorizationCodeUrl, 'https://accounts.google.com/...')
-			color: readableNegativeTextColor
+			text: googleLoginManager.oauthInProgress ? i18n("Waiting for authorization...") : i18n("Login with Google")
+			enabled: !googleLoginManager.oauthInProgress
+			onClicked: {
+				messageWidget.text = ""
+				googleLoginManager.startLoopbackAuth()
+			}
+		}
+
+		Label {
+			Layout.fillWidth: true
+			text: i18n("Click the button above to authorize in your browser. The authorization will complete automatically.")
+			color: Kirigami.Theme.disabledTextColor
 			wrapMode: Text.Wrap
-
-			// Tooltip
-			// QQC2.ToolTip.visible: !!hoveredLink
-			// QQC2.ToolTip.text: googleLoginManager.authorizationCodeUrl
-
-			// ContextMenu
-			MouseArea {
-				anchors.fill: parent
-				acceptedButtons: Qt.RightButton
-				onClicked: {
-					if (mouse.button === Qt.RightButton) {
-						contextMenu.popup()
-					}
-				}
-				onPressAndHold: {
-					if (mouse.source === Qt.MouseEventNotSynthesized) {
-						contextMenu.popup()
-					}
-				}
-
-				QQC2.Menu {
-					id: contextMenu
-					QQC2.MenuItem {
-						text: i18n("Copy Link")
-						onTriggered: clipboardHelper.copyText(googleLoginManager.authorizationCodeUrl)
-					}
-				}
-
-				TextEdit {
-					id: clipboardHelper
-					visible: false
-					function copyText(text) {
-						clipboardHelper.text = text
-						clipboardHelper.selectAll()
-						clipboardHelper.copy()
-					}
-				}
-			}
+			font.pointSize: Kirigami.Theme.smallFont.pointSize
 		}
-		RowLayout {
-			TextField {
-				id: authorizationCodeInput
-				Layout.fillWidth: true
-
-				placeholderText: i18n("Enter code here (Eg: %1)", '1/2B3C4defghijklmnopqrst-uvwxyz123456789ab-cdeFGHIJKlmnio')
-				text: ""
-			}
-			Button {
-				text: i18n("Submit")
-				onClicked: {
-					if (authorizationCodeInput.text) {
-						googleLoginManager.fetchAccessToken({
-							authorizationCode: authorizationCodeInput.text,
-						})
-					} else {
-						messageWidget.err(i18n("Invalid Google Authorization Code"))
-					}
-				}
-			}
-		}
-		
 	}
 
 	RowLayout {
@@ -247,7 +199,7 @@ ConfigPage {
 								visible: model.isReadOnly
 							}
 						}
-						
+
 					}
 
 					onClicked: {
@@ -330,7 +282,7 @@ ConfigPage {
 								visible: model.isReadOnly
 							}
 						}
-						
+
 					}
 
 					onClicked: {

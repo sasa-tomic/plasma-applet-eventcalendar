@@ -43,5 +43,6 @@ fi
 
 if $restartPlasmashell; then
 	killall plasmashell
-	kstart5 plasmashell
+	kstart5 plasmashell &>/dev/null &
+	disown
 fi
