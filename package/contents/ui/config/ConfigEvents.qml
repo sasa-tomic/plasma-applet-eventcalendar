@@ -79,6 +79,7 @@ ConfigPage {
 		ConfigNotification {
 			label: i18n("Event Reminder")
 			notificationEnabledKey: 'eventReminderNotificationEnabled'
+			persistentKey: 'eventReminderNotificationPersistent'
 			sfxEnabledKey: 'eventReminderSfxEnabled'
 			sfxPathKey: 'eventReminderSfxPath'
 			sfxPathDefaultValue: '/usr/share/sounds/Oxygen-Im-Nudge.ogg'
@@ -99,6 +100,7 @@ ConfigPage {
 		ConfigNotification {
 			label: i18n("Event Starting")
 			notificationEnabledKey: 'eventStartingNotificationEnabled'
+			persistentKey: 'eventStartingNotificationPersistent'
 			sfxEnabledKey: 'eventStartingSfxEnabled'
 			sfxPathKey: 'eventStartingSfxPath'
 			sfxPathDefaultValue: '/usr/share/sounds/Oxygen-Im-Nudge.ogg'

@@ -1,4 +1,4 @@
-// Version 4
+// Version 5
 
 import QtQuick 2.0
 import QtQuick.Controls 1.1
@@ -10,6 +10,9 @@ ColumnLayout {
 	property alias notificationEnabledKey: notificationEnabledCheckBox.configKey
 
 	property alias notificationEnabled: notificationEnabledCheckBox.checked
+
+	property alias persistentKey: persistentCheckBox.configKey
+	property alias persistent: persistentCheckBox.checked
 
 	property alias sfxLabel: configSound.label
 	property alias sfxEnabledKey: configSound.sfxEnabledKey
@@ -23,6 +26,16 @@ ColumnLayout {
 
 	ConfigCheckBox {
 		id: notificationEnabledCheckBox
+	}
+
+	RowLayout {
+		spacing: 0
+		Item { implicitWidth: indentWidth } // indent
+		ConfigCheckBox {
+			id: persistentCheckBox
+			enabled: notificationEnabled
+			text: i18n("Persistent (stay until dismissed)")
+		}
 	}
 
 	RowLayout {

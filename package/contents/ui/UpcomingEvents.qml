@@ -10,6 +10,17 @@ CalendarManager {
 	property int upcomingEventRange: 90 // minutes
 	property int minutesBeforeReminding: plasmoid.configuration.eventReminderMinutesBefore // minutes
 
+	// Track events we've already sent reminders/notifications for to avoid duplicates
+	// Using explicit object to avoid QML property mutation issues
+	property var _notificationTracking: ({
+		reminded: {},
+		notified: {}
+	})
+	function hasReminded(eventUid) { return !!_notificationTracking.reminded[eventUid] }
+	function hasNotified(eventUid) { return !!_notificationTracking.notified[eventUid] }
+	function markReminded(eventUid, expiresAt) { _notificationTracking.reminded[eventUid] = expiresAt }
+	function markNotified(eventUid, expiresAt) { _notificationTracking.notified[eventUid] = expiresAt }
+
 	onFetchingData: {
 		logger.debug('upcomingEvents.onFetchingData')
 
@@ -46,6 +57,15 @@ CalendarManager {
 	function shouldSendReminder(eventItem) {
 		var reminderDateTime = getDeltaMinutes(timeModel.currentTime, minutesBeforeReminding)
 		return isSameMinute(reminderDateTime, eventItem.startDateTime)
+	}
+
+	// Check if event is within reminder window but we haven't sent a reminder yet
+	function isWithinReminderWindow(eventItem) {
+		var now = timeModel.currentTime
+		var msUntilStart = eventItem.startDateTime - now
+		var reminderWindowMs = minutesBeforeReminding * 60 * 1000
+		// Event starts within the reminder window (but not in the past)
+		return msUntilStart > 0 && msUntilStart <= reminderWindowMs
 	}
 
 	function isEventStarting(eventItem) {
@@ -164,53 +184,103 @@ CalendarManager {
 			relativeDate: timeModel.currentTime,
 			clock24h: appletConfig.clock24h,
 		})
-		notificationManager.notify({
+		var args = {
 			appName: i18n("Event Calendar"),
 			appIcon: "view-calendar-upcoming-events",
-			// expireTimeout: (minutes*60 - 1) * 1000, // timeout resets on hover so may last longer than event starts.
 			summary: summaryText,
 			body: bodyText,
 			soundFile: plasmoid.configuration.eventReminderSfxEnabled ? plasmoid.configuration.eventReminderSfxPath : '',
-		})
+		}
+		if (plasmoid.configuration.eventReminderNotificationPersistent) {
+			args.expireTimeout = 0 // 0 = EXPIRES_NEVER in libnotify
+		}
+		notificationManager.notify(args)
 	}
 
 	function sendEventStartingNotification(eventItem) {
-		notificationManager.notify({
+		var args = {
 			appName: i18n("Event Calendar"),
 			appIcon: "view-calendar-upcoming-events",
-			// expireTimeout: 10000,
 			summary: eventItem.summary,
 			body: LocaleFuncs.formatEventDuration(eventItem, {
 				relativeDate: timeModel.currentTime,
 				clock24h: appletConfig.clock24h,
 			}),
 			soundFile: plasmoid.configuration.eventStartingSfxEnabled ? plasmoid.configuration.eventStartingSfxPath : '',
-		})
+		}
+		if (plasmoid.configuration.eventStartingNotificationPersistent) {
+			args.expireTimeout = 0 // 0 = EXPIRES_NEVER in libnotify
+		}
+		notificationManager.notify(args)
+	}
+
+	function getEventUniqueId(eventItem) {
+		// Create a unique ID for tracking notifications
+		return eventItem.calendarId + '_' + eventItem.id + '_' + eventItem.startDateTime.getTime()
+	}
+
+	function cleanupOldTracking() {
+		// Remove tracking entries for events that have already started (reminders)
+		// or already ended (notifications)
+		var now = timeModel.currentTime.getTime()
+		for (var eventUid in _notificationTracking.reminded) {
+			// Clean up reminders after event starts
+			if (_notificationTracking.reminded[eventUid] < now) {
+				delete _notificationTracking.reminded[eventUid]
+			}
+		}
+		for (var eventUid in _notificationTracking.notified) {
+			// Clean up notifications after event ends (stored as endDateTime)
+			if (_notificationTracking.notified[eventUid] < now) {
+				delete _notificationTracking.notified[eventUid]
+			}
+		}
 	}
 
 	function checkForEventsStarting() {
 		var eventsChecked = 0
 		var notificationsSent = 0
+		cleanupOldTracking()
+
 		for (var calendarId in eventsByCalendar) {
 			var calendar = eventsByCalendar[calendarId]
 			calendar.items.forEach(function(eventItem, index, calendarEventList) {
 				eventsChecked++
-				if (isEventStarting(eventItem)) {
-					logger.debug('upcomingEvents: event starting now:', eventItem.summary, eventItem.startDateTime)
-					if (plasmoid.configuration.eventStartingNotificationEnabled) {
+				var eventUid = getEventUniqueId(eventItem)
+
+				if (isEventStarting(eventItem) || (isEventInProgress(eventItem) && !hasNotified(eventUid))) {
+					var isStartingNow = isEventStarting(eventItem)
+					logger.debug('upcomingEvents:', isStartingNow ? 'event starting now:' : 'event in progress (catch-up):', eventItem.summary, eventItem.startDateTime)
+					if (plasmoid.configuration.eventStartingNotificationEnabled && !hasNotified(eventUid)) {
 						sendEventStartingNotification(eventItem)
+						markNotified(eventUid, eventItem.endDateTime.getTime()) // Track until event ends
+						logger.debug('upcomingEvents: marked as notified:', eventUid)
 						notificationsSent++
+					} else if (hasNotified(eventUid)) {
+						logger.debug('upcomingEvents: already notified for:', eventItem.summary)
 					} else {
 						logger.debug('upcomingEvents: eventStartingNotificationEnabled is disabled')
 					}
-				} else if (shouldSendReminder(eventItem)) {
-					logger.debug('upcomingEvents: sending reminder for:', eventItem.summary, minutesBeforeReminding, 'minutes before')
-					if (plasmoid.configuration.eventReminderNotificationEnabled) {
+				} else if (plasmoid.configuration.eventReminderNotificationEnabled && !hasReminded(eventUid)) {
+					// Check both exact time and window-based reminders
+					if (shouldSendReminder(eventItem)) {
+						logger.debug('upcomingEvents: sending reminder for:', eventItem.summary, minutesBeforeReminding, 'minutes before')
 						sendEventReminderNotification(eventItem, minutesBeforeReminding)
+						markReminded(eventUid, eventItem.startDateTime.getTime())
 						notificationsSent++
-					} else {
-						logger.debug('upcomingEvents: eventReminderNotificationEnabled is disabled')
+					} else if (isWithinReminderWindow(eventItem)) {
+						// Event is within reminder window (e.g., added after reminder time passed)
+						var msUntilStart = eventItem.startDateTime - timeModel.currentTime
+						var minutesUntilStart = Math.ceil(msUntilStart / 60000)
+						logger.debug('upcomingEvents: sending catch-up reminder for:', eventItem.summary, minutesUntilStart, 'minutes before')
+						sendEventReminderNotification(eventItem, minutesUntilStart)
+						markReminded(eventUid, eventItem.startDateTime.getTime())
+						notificationsSent++
 					}
+				} else if (hasReminded(eventUid)) {
+					// Already reminded, skip silently
+				} else if (!plasmoid.configuration.eventReminderNotificationEnabled) {
+					logger.debug('upcomingEvents: eventReminderNotificationEnabled is disabled')
 				}
 			})
 		}

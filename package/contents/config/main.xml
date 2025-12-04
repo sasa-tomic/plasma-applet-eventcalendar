@@ -315,6 +315,10 @@
 		<entry name="eventReminderNotificationEnabled" type="bool">
 			<default>true</default>
 		</entry>
+		<entry name="eventReminderNotificationPersistent" type="bool">
+			<label>Whether the event reminder notification stays until dismissed</label>
+			<default>false</default>
+		</entry>
 		<entry name="eventReminderSfxEnabled" type="bool">
 			<default>false</default>
 		</entry>
@@ -326,6 +330,10 @@
 		</entry>
 		<entry name="eventStartingNotificationEnabled" type="bool">
 			<default>true</default>
+		</entry>
+		<entry name="eventStartingNotificationPersistent" type="bool">
+			<label>Whether the event starting notification stays until dismissed</label>
+			<default>false</default>
 		</entry>
 		<entry name="eventStartingSfxEnabled" type="bool">
 			<default>true</default>
