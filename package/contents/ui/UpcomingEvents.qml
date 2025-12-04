@@ -189,39 +189,78 @@ CalendarManager {
 	}
 
 	function checkForEventsStarting() {
+		var eventsChecked = 0
+		var notificationsSent = 0
 		for (var calendarId in eventsByCalendar) {
 			var calendar = eventsByCalendar[calendarId]
 			calendar.items.forEach(function(eventItem, index, calendarEventList) {
+				eventsChecked++
 				if (isEventStarting(eventItem)) {
+					logger.debug('upcomingEvents: event starting now:', eventItem.summary, eventItem.startDateTime)
 					if (plasmoid.configuration.eventStartingNotificationEnabled) {
 						sendEventStartingNotification(eventItem)
+						notificationsSent++
+					} else {
+						logger.debug('upcomingEvents: eventStartingNotificationEnabled is disabled')
 					}
 				} else if (shouldSendReminder(eventItem)) {
+					logger.debug('upcomingEvents: sending reminder for:', eventItem.summary, minutesBeforeReminding, 'minutes before')
 					if (plasmoid.configuration.eventReminderNotificationEnabled) {
 						sendEventReminderNotification(eventItem, minutesBeforeReminding)
+						notificationsSent++
+					} else {
+						logger.debug('upcomingEvents: eventReminderNotificationEnabled is disabled')
 					}
 				}
 			})
 		}
+		if (eventsChecked > 0) {
+			logger.debug('upcomingEvents: checked', eventsChecked, 'events, sent', notificationsSent, 'notifications')
+		}
 	}
 
 	function tick() {
+		logger.debug('upcomingEvents: tick at', timeModel.currentTime)
 		checkForEventsStarting()
+	}
+
+	function syncWithEventModel() {
+		// if data is from current month
+		if (eventModel.dateMin <= timeModel.currentTime && timeModel.currentTime <= eventModel.dateMax) {
+			logger.debug('syncing upcomingEvents with eventModel')
+			upcomingEvents.clear()
+			upcomingEvents.dateMin = eventModel.dateMin
+			upcomingEvents.dateMax = eventModel.dateMax
+			upcomingEvents.eventsByCalendar = eventModel.eventsByCalendar
+			upcomingEvents.allDataFetched()
+		}
 	}
 
 	Connections {
 		target: eventModel
 		onAllDataFetched: {
 			logger.debug('upcomingEvents eventModel.onAllDataFetched', eventModel.dateMin, timeModel.currentTime, eventModel.dateMax)
-			// if data is from current month
-			if (eventModel.dateMin <= timeModel.currentTime && timeModel.currentTime <= eventModel.dateMax) {
-				logger.debug('syncing upcomingEvents with eventModel')
-				upcomingEvents.clear()
-				upcomingEvents.dateMin = eventModel.dateMin
-				upcomingEvents.dateMax = eventModel.dateMax
-				upcomingEvents.eventsByCalendar = eventModel.eventsByCalendar
-				upcomingEvents.allDataFetched()
-			}
+			syncWithEventModel()
+		}
+		onEventAdded: {
+			logger.debug('upcomingEvents eventModel.onEventAdded', calendarId)
+			syncWithEventModel()
+		}
+		onEventCreated: {
+			logger.debug('upcomingEvents eventModel.onEventCreated', calendarId)
+			syncWithEventModel()
+		}
+		onEventUpdated: {
+			logger.debug('upcomingEvents eventModel.onEventUpdated', calendarId, eventId)
+			syncWithEventModel()
+		}
+		onEventRemoved: {
+			logger.debug('upcomingEvents eventModel.onEventRemoved', calendarId, eventId)
+			syncWithEventModel()
+		}
+		onEventDeleted: {
+			logger.debug('upcomingEvents eventModel.onEventDeleted', calendarId, eventId)
+			syncWithEventModel()
 		}
 	}
 
