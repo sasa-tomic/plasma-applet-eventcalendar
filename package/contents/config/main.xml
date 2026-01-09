@@ -341,6 +341,10 @@
 		<entry name="eventStartingSfxPath" type="string">
 			<default>/usr/share/sounds/Oxygen-Im-Nudge.ogg</default>
 		</entry>
+		<entry name="notificationHistory" type="string">
+			<label>JSON cache of recently shown notifications to avoid duplicates (auto-managed)</label>
+			<default>{}</default>
+		</entry>
 		<entry name="enabledCalendarPlugins" type="StringList">
 			<!-- Filenames stored in: -->
 			<!-- Ubuntu: /usr/lib/x86_64-linux-gnu/qt5/plugins/plasmacalendarplugins/ -->

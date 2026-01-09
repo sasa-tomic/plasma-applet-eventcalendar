@@ -10,16 +10,84 @@ CalendarManager {
 	property int upcomingEventRange: 90 // minutes
 	property int minutesBeforeReminding: plasmoid.configuration.eventReminderMinutesBefore // minutes
 
-	// Track events we've already sent reminders/notifications for to avoid duplicates
-	// Using explicit object to avoid QML property mutation issues
-	property var _notificationTracking: ({
-		reminded: {},
-		notified: {}
-	})
-	function hasReminded(eventUid) { return !!_notificationTracking.reminded[eventUid] }
-	function hasNotified(eventUid) { return !!_notificationTracking.notified[eventUid] }
-	function markReminded(eventUid, expiresAt) { _notificationTracking.reminded[eventUid] = expiresAt }
-	function markNotified(eventUid, expiresAt) { _notificationTracking.notified[eventUid] = expiresAt }
+	// Persistent notification history cache to avoid duplicate notifications
+	// Stored as JSON in plasmoid.configuration.notificationHistory
+	// Format: { "eventUid": { "reminded": timestamp, "notified": timestamp, "shownAt": timestamp } }
+	property var _notificationHistory: ({})
+	property bool _historyLoaded: false
+	property int _historyCacheMs: 24 * 60 * 60 * 1000 // Keep entries for 24 hours
+
+	function loadNotificationHistory() {
+		if (_historyLoaded) return
+		try {
+			var historyJson = plasmoid.configuration.notificationHistory || '{}'
+			_notificationHistory = JSON.parse(historyJson)
+			logger.debug('upcomingEvents: loaded notification history with', Object.keys(_notificationHistory).length, 'entries')
+		} catch (e) {
+			logger.debug('upcomingEvents: failed to parse notification history, starting fresh:', e)
+			_notificationHistory = {}
+		}
+		_historyLoaded = true
+		cleanupOldHistory()
+	}
+
+	function saveNotificationHistory() {
+		try {
+			plasmoid.configuration.notificationHistory = JSON.stringify(_notificationHistory)
+		} catch (e) {
+			logger.debug('upcomingEvents: failed to save notification history:', e)
+		}
+	}
+
+	function cleanupOldHistory() {
+		var now = Date.now()
+		var cutoff = now - _historyCacheMs
+		var removedCount = 0
+		for (var eventUid in _notificationHistory) {
+			var entry = _notificationHistory[eventUid]
+			// Remove if the entry is older than 24 hours
+			if (entry.shownAt < cutoff) {
+				delete _notificationHistory[eventUid]
+				removedCount++
+			}
+		}
+		if (removedCount > 0) {
+			logger.debug('upcomingEvents: cleaned up', removedCount, 'old notification history entries')
+			saveNotificationHistory()
+		}
+	}
+
+	function hasReminded(eventUid) {
+		loadNotificationHistory()
+		return !!(_notificationHistory[eventUid] && _notificationHistory[eventUid].reminded)
+	}
+
+	function hasNotified(eventUid) {
+		loadNotificationHistory()
+		return !!(_notificationHistory[eventUid] && _notificationHistory[eventUid].notified)
+	}
+
+	function markReminded(eventUid, expiresAt) {
+		loadNotificationHistory()
+		if (!_notificationHistory[eventUid]) {
+			_notificationHistory[eventUid] = {}
+		}
+		_notificationHistory[eventUid].reminded = expiresAt
+		_notificationHistory[eventUid].shownAt = Date.now()
+		saveNotificationHistory()
+		logger.debug('upcomingEvents: marked as reminded:', eventUid)
+	}
+
+	function markNotified(eventUid, expiresAt) {
+		loadNotificationHistory()
+		if (!_notificationHistory[eventUid]) {
+			_notificationHistory[eventUid] = {}
+		}
+		_notificationHistory[eventUid].notified = expiresAt
+		_notificationHistory[eventUid].shownAt = Date.now()
+		saveNotificationHistory()
+		logger.debug('upcomingEvents: marked as notified:', eventUid)
+	}
 
 	// Track active live-updating notifications
 	// Key: eventUid, Value: { notificationId, eventItem, expiresAt }
@@ -379,21 +447,9 @@ CalendarManager {
 	}
 
 	function cleanupOldTracking() {
-		// Remove tracking entries for events that have already started (reminders)
-		// or already ended (notifications)
-		var now = timeModel.currentTime.getTime()
-		for (var eventUid in _notificationTracking.reminded) {
-			// Clean up reminders after event starts
-			if (_notificationTracking.reminded[eventUid] < now) {
-				delete _notificationTracking.reminded[eventUid]
-			}
-		}
-		for (var eventUid in _notificationTracking.notified) {
-			// Clean up notifications after event ends (stored as endDateTime)
-			if (_notificationTracking.notified[eventUid] < now) {
-				delete _notificationTracking.notified[eventUid]
-			}
-		}
+		// Clean up persistent notification history
+		// This removes entries older than 24 hours
+		cleanupOldHistory()
 	}
 
 	function checkForEventsStarting() {
