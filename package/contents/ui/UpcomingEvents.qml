@@ -21,6 +21,114 @@ CalendarManager {
 	function markReminded(eventUid, expiresAt) { _notificationTracking.reminded[eventUid] = expiresAt }
 	function markNotified(eventUid, expiresAt) { _notificationTracking.notified[eventUid] = expiresAt }
 
+	// Track active live-updating notifications
+	// Key: eventUid, Value: { notificationId, eventItem, expiresAt }
+	property var _activeNotifications: ({})
+
+	function registerActiveNotification(eventUid, notificationId, eventItem, expiresAt, phase) {
+		_activeNotifications[eventUid] = {
+			notificationId: notificationId,
+			eventItem: eventItem,
+			expiresAt: expiresAt,
+			phase: phase || LocaleFuncs.CountdownPhase.UPCOMING
+		}
+		logger.debug('upcomingEvents: registered active notification:', eventUid, 'id:', notificationId, 'phase:', phase)
+	}
+
+	function unregisterActiveNotification(eventUid) {
+		if (_activeNotifications[eventUid]) {
+			delete _activeNotifications[eventUid]
+			logger.debug('upcomingEvents: unregistered active notification:', eventUid)
+		}
+	}
+
+	function cleanupExpiredActiveNotifications() {
+		var now = timeModel.currentTime.getTime()
+		for (var eventUid in _activeNotifications) {
+			if (_activeNotifications[eventUid].expiresAt < now) {
+				unregisterActiveNotification(eventUid)
+			}
+		}
+	}
+
+	function updateActiveNotifications() {
+		cleanupExpiredActiveNotifications()
+
+		for (var eventUid in _activeNotifications) {
+			var info = _activeNotifications[eventUid]
+			var eventItem = info.eventItem
+			var notificationId = info.notificationId
+			var previousPhase = info.phase
+
+			// Get current countdown info with phase
+			var countdownInfo = LocaleFuncs.getEventCountdownInfo(eventItem.startDateTime, timeModel.currentTime)
+			var currentPhase = countdownInfo.phase
+			var summaryText = countdownInfo.text
+
+			var bodyText = ''
+			bodyText += eventItem.summary + '<br />'
+			bodyText += LocaleFuncs.formatEventDuration(eventItem, {
+				relativeDate: timeModel.currentTime,
+				clock24h: appletConfig.clock24h,
+			})
+
+			// Detect phase transitions
+			var phaseChanged = previousPhase !== currentPhase
+			var isNowStarting = phaseChanged && currentPhase === LocaleFuncs.CountdownPhase.STARTING
+			var isNowStarted = phaseChanged && currentPhase === LocaleFuncs.CountdownPhase.STARTED
+
+			logger.debug('upcomingEvents: updating notification:', eventUid, 'summary:', summaryText,
+				'phase:', previousPhase, '->', currentPhase, 'changed:', phaseChanged)
+
+			var args = {
+				appName: i18n("Event Calendar"),
+				appIcon: "view-calendar-upcoming-events",
+				summary: summaryText,
+				body: bodyText,
+				noWait: true,
+				expireTimeout: 0, // Keep persistent
+			}
+
+			// On phase change, make the notification more prominent
+			if (isNowStarting) {
+				// Event is starting NOW - critical urgency, play sound multiple times, new popup
+				// Re-generate text with emphasis
+				summaryText = LocaleFuncs.formatEventCountdown(eventItem.startDateTime, timeModel.currentTime, true)
+				args.summary = summaryText
+				args.urgency = 'critical'
+				args.soundFile = plasmoid.configuration.eventStartingSfxEnabled ? plasmoid.configuration.eventStartingSfxPath : ''
+				args.loop = 3 // Play sound 3 times
+				args.loopDelay = 0.8 // 0.8 seconds between plays
+				// Don't use replaceId - create fresh notification to grab attention
+				logger.debug('upcomingEvents: EVENT STARTING NOW - playing sound and creating prominent notification')
+			} else if (isNowStarted) {
+				// Event just started (first minute after start) - high urgency, play sound
+				// Re-generate text with emphasis
+				summaryText = LocaleFuncs.formatEventCountdown(eventItem.startDateTime, timeModel.currentTime, true)
+				args.summary = summaryText
+				args.urgency = 'critical'
+				args.soundFile = plasmoid.configuration.eventStartingSfxEnabled ? plasmoid.configuration.eventStartingSfxPath : ''
+				args.loop = 2 // Play sound 2 times
+				args.loopDelay = 1.0
+				// Don't use replaceId - create fresh notification
+				logger.debug('upcomingEvents: EVENT STARTED - playing sound and creating prominent notification')
+			} else {
+				// Normal update - just replace quietly
+				args.replaceId = notificationId
+			}
+
+			// Update the phase
+			info.phase = currentPhase
+
+			notificationManager.notify(args, function(actionId, newNotificationId) {
+				// Update stored notification ID if it changed
+				if (newNotificationId && newNotificationId !== notificationId) {
+					info.notificationId = newNotificationId
+				}
+			})
+		}
+	}
+
 	onFetchingData: {
 		logger.debug('upcomingEvents.onFetchingData')
 
@@ -176,8 +284,11 @@ CalendarManager {
 	}
 
 	function sendEventReminderNotification(eventItem, minutes) {
-		var deltaText = LocaleFuncs.durationShortFormat(minutes * 60)
-		var summaryText = i18nc("%1 = 15 minutes", "Starting in %1", deltaText)
+		var eventUid = getEventUniqueId(eventItem)
+		var countdownInfo = LocaleFuncs.getEventCountdownInfo(eventItem.startDateTime, timeModel.currentTime)
+		var summaryText = countdownInfo.text
+		var initialPhase = countdownInfo.phase
+
 		var bodyText = ''
 		bodyText += eventItem.summary + '<br />'
 		bodyText += LocaleFuncs.formatEventDuration(eventItem, {
@@ -191,27 +302,75 @@ CalendarManager {
 			body: bodyText,
 			soundFile: plasmoid.configuration.eventReminderSfxEnabled ? plasmoid.configuration.eventReminderSfxPath : '',
 		}
+
+		// For persistent notifications, use live-updating mode
 		if (plasmoid.configuration.eventReminderNotificationPersistent) {
 			args.expireTimeout = 0 // 0 = EXPIRES_NEVER in libnotify
+			args.noWait = true // Don't block - we'll update this notification
+
+			notificationManager.notify(args, function(actionId, notificationId) {
+				if (notificationId) {
+					// Register for live updates until the event ends
+					registerActiveNotification(eventUid, notificationId, eventItem, eventItem.endDateTime.getTime(), initialPhase)
+				}
+			})
+		} else {
+			// Non-persistent notifications don't need updates
+			notificationManager.notify(args)
 		}
-		notificationManager.notify(args)
 	}
 
 	function sendEventStartingNotification(eventItem) {
+		var eventUid = getEventUniqueId(eventItem)
+		// Use emphasis for starting notifications
+		var countdownInfo = LocaleFuncs.getEventCountdownInfo(eventItem.startDateTime, timeModel.currentTime, true)
+		var summaryText = countdownInfo.text
+		var initialPhase = countdownInfo.phase
+
+		var bodyText = ''
+		bodyText += eventItem.summary + '<br />'
+		bodyText += LocaleFuncs.formatEventDuration(eventItem, {
+			relativeDate: timeModel.currentTime,
+			clock24h: appletConfig.clock24h,
+		})
+
+		// Check if there's an existing reminder notification we can reuse
+		var existingNotification = _activeNotifications[eventUid]
+		var existingNotificationId = existingNotification ? existingNotification.notificationId : 0
+
 		var args = {
 			appName: i18n("Event Calendar"),
 			appIcon: "view-calendar-upcoming-events",
-			summary: eventItem.summary,
-			body: LocaleFuncs.formatEventDuration(eventItem, {
-				relativeDate: timeModel.currentTime,
-				clock24h: appletConfig.clock24h,
-			}),
+			summary: summaryText,
+			body: bodyText,
 			soundFile: plasmoid.configuration.eventStartingSfxEnabled ? plasmoid.configuration.eventStartingSfxPath : '',
+			urgency: 'critical', // Event starting notifications are always critical
+			loop: 3, // Play sound 3 times for starting notifications
+			loopDelay: 0.8,
 		}
+
+		// Don't reuse existing notification - we want a fresh popup for "starting now"
+		// This ensures the notification grabs attention
+
+		// For persistent notifications, use live-updating mode
 		if (plasmoid.configuration.eventStartingNotificationPersistent) {
 			args.expireTimeout = 0 // 0 = EXPIRES_NEVER in libnotify
+			args.noWait = true // Don't block - we'll update this notification
+
+			notificationManager.notify(args, function(actionId, notificationId) {
+				if (notificationId) {
+					// Register for live updates until the event ends
+					registerActiveNotification(eventUid, notificationId, eventItem, eventItem.endDateTime.getTime(), initialPhase)
+				}
+			})
+		} else {
+			// Non-persistent notifications don't need updates
+			// If we had an active notification, unregister it
+			if (existingNotificationId) {
+				unregisterActiveNotification(eventUid)
+			}
+			notificationManager.notify(args)
 		}
-		notificationManager.notify(args)
 	}
 
 	function getEventUniqueId(eventItem) {
@@ -292,6 +451,7 @@ CalendarManager {
 	function tick() {
 		logger.debug('upcomingEvents: tick at', timeModel.currentTime)
 		checkForEventsStarting()
+		updateActiveNotifications()
 	}
 
 	function syncWithEventModel() {

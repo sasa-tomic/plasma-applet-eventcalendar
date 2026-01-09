@@ -94,6 +94,17 @@ class Canberra:
 # play them with libcanberra. We can't use canberra-gtk-play since
 # it requires the gnome-session-canberra package in Ubuntu,
 # which is not installed by default.
+import time
+
+def playSoundOnce(canberra, sound, props):
+	if sound.startswith('file://'):
+		sound = sound[len('file://'):]
+
+	if sound.startswith('/'):
+		canberra.playFile(sound, *props)
+	else:
+		canberra.playEvent(sound, *props)
+
 def playSound(args):
 	if not Canberra.installed():
 		sys.stderr.write('skipping playing sound\n')
@@ -105,20 +116,14 @@ def playSound(args):
 		Canberra.Prop.APPLICATION_NAME, args.appName,
 	]
 
-	if args.sound.startswith('file://'):
-		args.sound = args.sound[len('file://'):]
+	playSoundOnce(canberra, args.sound, props)
 
-	if args.sound.startswith('/'):
-		canberra.playFile(args.sound, *props)
-	else:
-		canberra.playEvent(args.sound, *props)
-
-
-	if args.loop:
-		for i in range(args.loop):
-			# TODO: wait for playEffect to end.
-			# TODO: wrap playEffect in a function, and call it here.
-			pass
+	# Loop sound with delay between plays
+	if args.loop and args.loop > 1:
+		delay = args.loopDelay if args.loopDelay else 1.0
+		for i in range(args.loop - 1):
+			time.sleep(delay)
+			playSoundOnce(canberra, args.sound, props)
 
 
 #---
@@ -140,6 +145,27 @@ def notify(args):
 	# Note: EXPIRES_DEFAULT = -1, EXPIRES_NEVER = 0
 	n.set_timeout(args.timeout)
 
+	# Set urgency level (low, normal, critical)
+	if args.urgency:
+		urgency_map = {
+			'low': Notify.Urgency.LOW,
+			'normal': Notify.Urgency.NORMAL,
+			'critical': Notify.Urgency.CRITICAL,
+		}
+		if args.urgency in urgency_map:
+			n.set_urgency(urgency_map[args.urgency])
+
+	# Set replace ID to update an existing notification instead of creating a new one
+	if args.replaceId:
+		# Use the hint to set the replaces_id for the notification
+		n.set_hint_uint32("x-eventcalendar-id", args.replaceId)
+		# The proper way is to set the id on the notification object
+		# libnotify uses the id internally for replacing
+		try:
+			n.props.id = args.replaceId
+		except:
+			pass  # Older versions might not support this
+
 	def on_action(notification, action, *user_data):
 		sys.stdout.write(' '.join([action, *user_data]) + '\n')
 		if sfxProc:
@@ -157,9 +183,20 @@ def notify(args):
 			n.add_action(actionId, actionLabel, on_action)
 	n.show()
 
+	# Output the notification ID for potential updates
+	# The ID is assigned after show() and can be used with --replace-id
+	notificationId = n.props.id if hasattr(n.props, 'id') else 0
+	sys.stdout.write('id:{}\n'.format(notificationId))
+	sys.stdout.flush()
+
 	#--- Sound
 	if args.sound:
 		playSound(args)
+
+	# In no-wait mode, exit immediately after showing the notification
+	# This is useful for notifications that will be updated later
+	if args.noWait:
+		return
 
 	loop.run()
 
@@ -170,10 +207,19 @@ def main():
 	parser.add_argument('--icon', default='')
 	parser.add_argument('--app-name', dest='appName', default='Event Calendar')
 	parser.add_argument('--sound')
-	parser.add_argument('--loop')
+	parser.add_argument('--loop', type=int, default=1,
+		help='Number of times to play the sound (default: 1)')
+	parser.add_argument('--loop-delay', dest='loopDelay', type=float, default=1.0,
+		help='Delay in seconds between sound loops (default: 1.0)')
 	parser.add_argument('--timeout', type=int, default=Notify.EXPIRES_DEFAULT)
 	parser.add_argument('--action', dest='actions', action='append')
 	parser.add_argument('--metadata')
+	parser.add_argument('--replace-id', dest='replaceId', type=int, default=0,
+		help='Replace an existing notification by ID instead of creating a new one')
+	parser.add_argument('--no-wait', dest='noWait', action='store_true',
+		help='Exit immediately after showing the notification (for updateable notifications)')
+	parser.add_argument('--urgency', choices=['low', 'normal', 'critical'],
+		help='Set notification urgency level')
 
 
 	try:

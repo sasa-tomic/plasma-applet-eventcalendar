@@ -99,3 +99,62 @@ function durationShortFormat(nSeconds) {
 	}
 	return str
 }
+
+// Event countdown phases
+var CountdownPhase = {
+	UPCOMING: 'upcoming',   // Event hasn't started yet
+	STARTING: 'starting',   // Event is starting now (within 30 seconds)
+	STARTED: 'started'      // Event has already started
+}
+
+// Get the countdown phase for an event
+function getEventCountdownPhase(eventStartDateTime, currentTime) {
+	var msUntilStart = eventStartDateTime - currentTime
+	var msAfterStart = currentTime - eventStartDateTime
+
+	if (msUntilStart > 30000) {
+		return CountdownPhase.UPCOMING
+	} else if (msAfterStart < 30000) {
+		return CountdownPhase.STARTING
+	} else {
+		return CountdownPhase.STARTED
+	}
+}
+
+// Format event countdown for notifications
+// Returns a summary text like "Starting in 5m", "Starting now", "Started 3m ago"
+// Set emphasize=true for more prominent text with attention indicators
+function formatEventCountdown(eventStartDateTime, currentTime, emphasize) {
+	var msUntilStart = eventStartDateTime - currentTime
+	var msAfterStart = currentTime - eventStartDateTime
+
+	if (msUntilStart > 30000) { // More than 30 seconds until start
+		// Event hasn't started yet
+		var secondsUntil = Math.ceil(msUntilStart / 1000)
+		var deltaText = durationShortFormat(secondsUntil)
+		return i18nc("%1 = time duration like '5m' or '1h30m'", "Starting in %1", deltaText)
+	} else if (msAfterStart < 30000) { // Within 30 seconds of start time
+		// Event is starting now - add emphasis if requested
+		if (emphasize) {
+			return "⚠️ " + i18n("STARTING NOW") + " ⚠️"
+		}
+		return i18n("Starting now")
+	} else {
+		// Event has already started
+		var secondsAfter = Math.floor(msAfterStart / 1000)
+		var deltaText = durationShortFormat(secondsAfter)
+		if (emphasize) {
+			return "🔴 " + i18nc("%1 = time duration like '5m' or '1h30m'", "Started %1 ago", deltaText)
+		}
+		return i18nc("%1 = time duration like '5m' or '1h30m'", "Started %1 ago", deltaText)
+	}
+}
+
+// Get countdown info with phase and text
+// Set emphasize=true for more prominent text on phase transitions
+function getEventCountdownInfo(eventStartDateTime, currentTime, emphasize) {
+	return {
+		phase: getEventCountdownPhase(eventStartDateTime, currentTime),
+		text: formatEventCountdown(eventStartDateTime, currentTime, emphasize)
+	}
+}
