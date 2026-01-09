@@ -1,7 +1,41 @@
 #!/bin/bash
-# Version 3
+# Version 5
 
-packageServiceType=`kreadconfig5 --file="$PWD/package/metadata.desktop" --group="Desktop Entry" --key="X-KDE-ServiceTypes"`
+source "$(dirname "$0")/scripts/common.sh"
+set -e
 
-# Eg: kpackagetool5 -t "Plasma/Applet" -r package
-kpackagetool5 -t "${packageServiceType}" -r package
+### Parse arguments
+for arg in "$@"; do
+	case "$arg" in
+		-h|--help)
+			echo "Usage: $0 [options]"
+			echo "Options:"
+			echo "  -h, --help    Show this help message"
+			exit 0;;
+	esac
+done
+
+### Detect Plasma version and set up tools
+plasmaVersion=$(detectPlasmaVersion)
+[ -z "$plasmaVersion" ] && echoError "Could not detect Plasma version." && exit 1
+echoInfo "Detected Plasma version: ${plasmaVersion}"
+
+setPlasmaTools "$plasmaVersion"
+requireCommand "$KREADCONFIG" "" "" "" "" || exit 1
+requireCommand "$KPACKAGETOOL" "" "" "" "" || exit 1
+
+### Read metadata and uninstall
+packageServiceType=$(readMetadata "X-KDE-ServiceTypes")
+packageNamespace=$(readMetadata "X-KDE-PluginInfo-Name")
+[ -z "$packageServiceType" ] && echoError "Could not read package service type from metadata.desktop" && exit 1
+
+echoInfo "Uninstalling package: ${packageNamespace}"
+
+if ! $KPACKAGETOOL --type="${packageServiceType}" --show="$packageNamespace" &> /dev/null; then
+	echoError "Package '${packageNamespace}' is not installed."
+	exit 1
+fi
+
+$KPACKAGETOOL -t "${packageServiceType}" -r package
+echoSuccess "Package uninstalled successfully!"
+echo "Note: You may need to restart plasmashell or log out/in for changes to take effect."

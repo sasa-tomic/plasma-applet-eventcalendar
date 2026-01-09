@@ -1,48 +1,94 @@
 #!/bin/bash
-# Version 5
+# Version 7
 
-# This script detects if the widget is already installed.
-# If it is, it will use --upgrade instead and restart plasmashell.
+source "$(dirname "$0")/scripts/common.sh"
+set -e
 
-packageNamespace=`kreadconfig5 --file="$PWD/package/metadata.desktop" --group="Desktop Entry" --key="X-KDE-PluginInfo-Name"`
-packageServiceType=`kreadconfig5 --file="$PWD/package/metadata.desktop" --group="Desktop Entry" --key="X-KDE-ServiceTypes"`
+### Parse arguments
 restartPlasmashell=false
-
+skipDepCheck=false
 for arg in "$@"; do
 	case "$arg" in
-		-r) restartPlasmashell=true;;
-		--restart) restartPlasmashell=true;;
-		*) ;;
+		-r|--restart) restartPlasmashell=true;;
+		--skip-dep-check) skipDepCheck=true;;
+		-h|--help)
+			echo "Usage: $0 [options]"
+			echo "Options:"
+			echo "  -r, --restart      Restart plasmashell after installation"
+			echo "  --skip-dep-check   Skip dependency checking"
+			echo "  -h, --help         Show this help message"
+			exit 0;;
 	esac
 done
 
-isAlreadyInstalled=false
-kpackagetool5 --type="${packageServiceType}" --show="$packageNamespace" &> /dev/null
-if [ $? == 0 ]; then
-	isAlreadyInstalled=true
+### Detect and validate Plasma version
+plasmaVersion=$(detectPlasmaVersion)
+[ -z "$plasmaVersion" ] && echoError "Could not detect Plasma version." && exit 1
+echoInfo "Detected Plasma version: ${plasmaVersion}"
+
+if [ "$plasmaVersion" == "6" ] && [ "$skipDepCheck" != true ]; then
+	echoError "Plasma 6 detected, but this widget currently only supports Plasma 5."
+	echo "Check for a 'plasma6' branch or KDE Store for an updated version."
+	echo "Run with --skip-dep-check to try anyway (not recommended)."
+	exit 1
 fi
+
+### Check dependencies
+checkDependencies() {
+	local v="$1" hasErrors=false
+	echoInfo "Checking dependencies for Plasma ${v}..."
+
+	if [ "$v" == "6" ]; then
+		requireCommand kreadconfig6 "libkf6config-bin" "kf6-kconfig" "kf6-kconfig" "kconfig" || hasErrors=true
+		requireCommand kpackagetool6 "libkf6package-bin" "kf6-kpackage" "kf6-kpackage" "kpackage" || hasErrors=true
+	else
+		requireCommand kreadconfig5 "libkf5config-bin" "kf5-kconfig" "kconfig5" "kconfig5" || hasErrors=true
+		requireCommand kpackagetool5 "libkf5package-bin" "kf5-kpackage" "kpackage5" "kpackage5" || hasErrors=true
+	fi
+
+	[ "$hasErrors" = true ] && return 1
+	echoSuccess "All required dependencies found."
+}
+
+if [ "$skipDepCheck" != true ]; then
+	checkDependencies "$plasmaVersion" || { echoError "Missing dependencies."; exit 1; }
+fi
+
+### Set up tools and read metadata
+setPlasmaTools "$plasmaVersion"
+packageNamespace=$(readMetadata "X-KDE-PluginInfo-Name")
+packageServiceType=$(readMetadata "X-KDE-ServiceTypes")
+[ -z "$packageNamespace" ] && echoError "Could not read package namespace from metadata.desktop" && exit 1
+
+echoInfo "Installing package: ${packageNamespace}"
+
+### Check if already installed
+isAlreadyInstalled=false
+$KPACKAGETOOL --type="${packageServiceType}" --show="$packageNamespace" &> /dev/null && isAlreadyInstalled=true
 
 ### metadata.desktop => metadata.json
-if command -v desktoptojson &> /dev/null ; then
-	genOutput=`desktoptojson --serviceType="plasma-applet.desktop" -i "$PWD/package/metadata.desktop" -o "$PWD/package/metadata.json"`
-	if [ "$?" != "0" ]; then
-		exit 1
-	fi
-	# Tabify metadata.json
-	sed -i '{s/ \{4\}/\t/g}' "$PWD/package/metadata.json"
-fi
+convertMetadataToJson
 
+### Install or upgrade
 if $isAlreadyInstalled; then
-	# Eg: kpackagetool5 -t "Plasma/Applet" -u package
-	kpackagetool5 -t "${packageServiceType}" -u package
+	echoInfo "Package already installed, upgrading..."
+	$KPACKAGETOOL -t "${packageServiceType}" -u package
 	restartPlasmashell=true
 else
-	# Eg: kpackagetool5 -t "Plasma/Applet" -i package
-	kpackagetool5 -t "${packageServiceType}" -i package
+	echoInfo "Installing package..."
+	$KPACKAGETOOL -t "${packageServiceType}" -i package
 fi
+echoSuccess "Installation complete!"
 
+### Restart plasmashell if needed
 if $restartPlasmashell; then
-	killall plasmashell
-	kstart5 plasmashell &>/dev/null &
+	echoInfo "Restarting plasmashell..."
+	killall plasmashell 2>/dev/null || true
+	if command -v $KSTART &> /dev/null; then
+		$KSTART plasmashell &>/dev/null &
+	else
+		nohup plasmashell &>/dev/null &
+	fi
 	disown
+	echoSuccess "Plasmashell restarted."
 fi

@@ -1,4 +1,31 @@
 #!/bin/bash
+# Version 3
 
+source "$(dirname "$0")/scripts/common.sh"
+set -e
+
+### Parse arguments
+for arg in "$@"; do
+	case "$arg" in
+		-h|--help)
+			echo "Usage: $0 [options]"
+			echo "Pulls latest changes from git and reinstalls the widget."
+			echo "All options are passed through to the install script."
+			echo ""
+			echo "Install script options:"
+			echo "  -r, --restart      Restart plasmashell after installation"
+			echo "  --skip-dep-check   Skip dependency checking"
+			exit 0;;
+	esac
+done
+
+### Check for git and repo
+requireCommand git git git git git || exit 1
+git rev-parse --git-dir &> /dev/null || { echoError "Not a git repository."; exit 1; }
+
+### Pull and install
+echoInfo "Pulling latest changes from git..."
 git pull origin master
-source ./install
+
+echoInfo "Running install script..."
+source ./install "$@"
