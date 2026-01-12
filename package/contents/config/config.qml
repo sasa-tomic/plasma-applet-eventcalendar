@@ -64,6 +64,12 @@ ConfigModel {
 		source: "lib/ConfigAdvanced.qml"
 		visible: plasmoid.configuration.debugging
 	}
+	ConfigCategory {
+		name: i18n("Debug Logs")
+		icon: "utilities-log-viewer"
+		source: "config/ConfigDebugLogs.qml"
+		visible: plasmoid.configuration.debugging
+	}
 
 	property Instantiator __eventPlugins: Instantiator {
 		model: PlasmaCalendar.EventPluginsManager.model

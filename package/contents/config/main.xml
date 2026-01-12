@@ -7,6 +7,10 @@
 		<entry name="debugging" type="bool">
 			<default>false</default>
 		</entry>
+		<entry name="debugLogCommand" type="string">
+			<label>Custom command to fetch debug logs</label>
+			<default>journalctl -b0 _COMM=plasmashell --no-pager</default>
+		</entry>
 		<entry name="pin" type="Bool">
 			<label>Whether the popup should remain open when another window is activated</label>
 			<default>false</default>
