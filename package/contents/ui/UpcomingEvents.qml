@@ -74,8 +74,8 @@ CalendarManager {
 		}
 		_notificationHistory[eventUid].reminded = expiresAt
 		_notificationHistory[eventUid].shownAt = Date.now()
-		saveNotificationHistory()
 		logger.debug('upcomingEvents: marked as reminded:', eventUid)
+		saveNotificationHistory()
 	}
 
 	function markNotified(eventUid, expiresAt) {
@@ -85,8 +85,8 @@ CalendarManager {
 		}
 		_notificationHistory[eventUid].notified = expiresAt
 		_notificationHistory[eventUid].shownAt = Date.now()
-		saveNotificationHistory()
 		logger.debug('upcomingEvents: marked as notified:', eventUid)
+		saveNotificationHistory()
 	}
 
 	// Track active live-updating notifications
@@ -553,5 +553,16 @@ CalendarManager {
 	Connections {
 		target: timeModel
 		onMinuteChanged: upcomingEvents.tick()
+	}
+
+	// On startup, clear active notifications since notification IDs are not valid across restarts
+	// and don't re-register notifications for events we've already notified about
+	Component.onCompleted: {
+		// Load the persistent notification history
+		loadNotificationHistory()
+		
+		// Clear _activeNotifications - notification IDs from previous session are invalid
+		// Events that were already notified are tracked in _notificationHistory
+		_activeNotifications = {}
 	}
 }
