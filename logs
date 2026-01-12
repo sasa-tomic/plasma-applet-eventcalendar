@@ -1,0 +1,109 @@
+#!/bin/bash
+# Fetch plasmashell logs for debugging the Event Calendar widget
+# Version 1
+
+source "$(dirname "$0")/scripts/common.sh"
+
+### Parse arguments
+filter="eventcalendar"
+maxLines=100
+showAll=false
+customCommand=""
+follow=false
+showHelp=false
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		-f|--filter)
+			filter="$2"
+			shift 2
+			;;
+		-n|--lines)
+			maxLines="$2"
+			shift 2
+			;;
+		-a|--all)
+			showAll=true
+			shift
+			;;
+		-c|--command)
+			customCommand="$2"
+			shift 2
+			;;
+		-F|--follow)
+			follow=true
+			shift
+			;;
+		-h|--help)
+			showHelp=true
+			shift
+			;;
+		*)
+			echoError "Unknown option: $1"
+			showHelp=true
+			shift
+			;;
+	esac
+done
+
+if $showHelp; then
+	echo "Usage: $0 [options]"
+	echo ""
+	echo "Fetch plasmashell logs for debugging the Event Calendar widget."
+	echo ""
+	echo "Options:"
+	echo "  -f, --filter TEXT   Filter logs containing TEXT (default: 'eventcalendar')"
+	echo "  -n, --lines N       Maximum number of lines to show (default: 100)"
+	echo "  -a, --all           Show all logs without filtering"
+	echo "  -c, --command CMD   Use custom command to fetch logs"
+	echo "  -F, --follow        Follow log output in real-time (like tail -f)"
+	echo "  -h, --help          Show this help message"
+	echo ""
+	echo "Examples:"
+	echo "  $0                    # Show last 100 eventcalendar logs"
+	echo "  $0 -a -n 50           # Show last 50 lines of all plasmashell logs"
+	echo "  $0 -f error           # Show logs containing 'error'"
+	echo "  $0 -F                 # Follow logs in real-time"
+	echo "  $0 -F -a              # Follow all plasmashell logs"
+	exit 0
+fi
+
+### Follow mode - use journalctl directly
+if $follow; then
+	echoInfo "Following plasmashell logs (Ctrl+C to stop)..."
+	if $showAll; then
+		journalctl -f _COMM=plasmashell
+	else
+		journalctl -f _COMM=plasmashell | grep -i --line-buffered "$filter"
+	fi
+	exit 0
+fi
+
+### Check for Python
+if ! command -v python3 &> /dev/null; then
+	echoError "python3 is required but not found"
+	exit 1
+fi
+
+### Build command
+scriptPath="$(dirname "$0")/package/contents/scripts/fetchlogs.py"
+
+if [ ! -f "$scriptPath" ]; then
+	echoError "Script not found: $scriptPath"
+	exit 1
+fi
+
+cmd=(python3 "$scriptPath" --lines "$maxLines")
+
+if $showAll; then
+	cmd+=(--no-filter)
+else
+	cmd+=(--filter "$filter")
+fi
+
+if [ -n "$customCommand" ]; then
+	cmd+=(--command "$customCommand")
+fi
+
+### Execute
+"${cmd[@]}"
