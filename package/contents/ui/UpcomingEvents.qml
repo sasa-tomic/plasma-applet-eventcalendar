@@ -93,6 +93,12 @@ CalendarManager {
 	// Key: eventUid, Value: { notificationId, eventItem, expiresAt }
 	property var _activeNotifications: ({})
 
+	// Track notifications that were dismissed by the user
+	// When we try to update a notification with replaceId but get a different ID back,
+	// it means the original notification was dismissed and a new one was created.
+	// We should stop updating in this case to respect user's intent.
+	property var _dismissedNotifications: ({})
+
 	function registerActiveNotification(eventUid, notificationId, eventItem, expiresAt, phase) {
 		_activeNotifications[eventUid] = {
 			notificationId: notificationId,
@@ -110,6 +116,16 @@ CalendarManager {
 		}
 	}
 
+	function markNotificationDismissed(eventUid) {
+		_dismissedNotifications[eventUid] = Date.now()
+		unregisterActiveNotification(eventUid)
+		logger.debug('upcomingEvents: marked notification as dismissed by user:', eventUid)
+	}
+
+	function wasNotificationDismissed(eventUid) {
+		return !!_dismissedNotifications[eventUid]
+	}
+
 	function cleanupExpiredActiveNotifications() {
 		var now = timeModel.currentTime.getTime()
 		for (var eventUid in _activeNotifications) {
@@ -123,6 +139,12 @@ CalendarManager {
 		cleanupExpiredActiveNotifications()
 
 		for (var eventUid in _activeNotifications) {
+			// Skip notifications that were dismissed by the user
+			if (wasNotificationDismissed(eventUid)) {
+				unregisterActiveNotification(eventUid)
+				continue
+			}
+
 			var info = _activeNotifications[eventUid]
 			var eventItem = info.eventItem
 			var notificationId = info.notificationId
@@ -188,8 +210,21 @@ CalendarManager {
 			// Update the phase
 			info.phase = currentPhase
 
+			// Capture whether we used a replaceId for this update
+			var usedReplaceId = args.replaceId
+
 			notificationManager.notify(args, function(actionId, newNotificationId) {
-				// Update stored notification ID if it changed
+				// Check if the notification was dismissed and recreated
+				// This happens when we use replaceId but get a different ID back
+				if (usedReplaceId && newNotificationId && newNotificationId !== usedReplaceId) {
+					// The user dismissed the notification, stop tracking it
+					// This prevents the notification from being recreated every tick
+					logger.debug('upcomingEvents: notification was dismissed by user (replaceId:', usedReplaceId, 'newId:', newNotificationId, ') - stopping updates')
+					markNotificationDismissed(eventUid)
+					return
+				}
+
+				// Update stored notification ID if it changed (for non-replace cases)
 				if (newNotificationId && newNotificationId !== notificationId) {
 					info.notificationId = newNotificationId
 				}
@@ -564,5 +599,8 @@ CalendarManager {
 		// Clear _activeNotifications - notification IDs from previous session are invalid
 		// Events that were already notified are tracked in _notificationHistory
 		_activeNotifications = {}
+
+		// Clear dismissed notifications - only relevant for current session
+		_dismissedNotifications = {}
 	}
 }
