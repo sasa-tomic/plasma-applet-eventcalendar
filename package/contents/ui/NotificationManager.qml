@@ -8,15 +8,6 @@ QtObject {
 
 	property var executable: ExecUtil { id: executable }
 
-	// Parse notification ID from stdout (format: "id:123\n...")
-	function parseNotificationId(stdout) {
-		var match = stdout.match(/^id:(\d+)/)
-		if (match) {
-			return parseInt(match[1], 10)
-		}
-		return 0
-	}
-
 	function notify(args, callback) {
 		logger.debugJSON('NotificationMananger.notify', args)
 		args.sound = args.sound || args.soundFile
@@ -49,11 +40,7 @@ QtObject {
 				cmd.push('--action', action)
 			}
 		}
-		// Support for updating existing notifications
-		if (args.replaceId) {
-			cmd.push('--replace-id', args.replaceId)
-		}
-		// Non-blocking mode for updateable notifications
+		// Non-blocking mode - show notification and exit without waiting for user interaction
 		if (args.noWait) {
 			cmd.push('--no-wait')
 		}
@@ -67,10 +54,10 @@ QtObject {
 		cmd.push(sanitizedSummary)
 		cmd.push(sanitizedBody)
 		executable.exec(cmd, function(cmd, exitCode, exitStatus, stdout, stderr) {
-			var notificationId = parseNotificationId(stdout)
-			var actionId = stdout.replace(/^id:\d+\n?/, '').replace('\n', ' ').trim()
 			if (typeof callback === 'function') {
-				callback(actionId, notificationId)
+				// Parse action ID from output (remove notification ID prefix if present)
+				var actionId = stdout.replace(/^id:\d+\n?/, '').replace('\n', ' ').trim()
+				callback(actionId)
 			}
 		})
 	}

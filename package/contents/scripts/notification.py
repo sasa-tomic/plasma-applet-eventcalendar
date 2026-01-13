@@ -155,17 +155,6 @@ def notify(args):
 		if args.urgency in urgency_map:
 			n.set_urgency(urgency_map[args.urgency])
 
-	# Set replace ID to update an existing notification instead of creating a new one
-	if args.replaceId:
-		# Use the hint to set the replaces_id for the notification
-		n.set_hint_uint32("x-eventcalendar-id", args.replaceId)
-		# The proper way is to set the id on the notification object
-		# libnotify uses the id internally for replacing
-		try:
-			n.props.id = args.replaceId
-		except:
-			pass  # Older versions might not support this
-
 	def on_action(notification, action, *user_data):
 		sys.stdout.write(' '.join([action, *user_data]) + '\n')
 		if sfxProc:
@@ -214,13 +203,10 @@ def main():
 	parser.add_argument('--timeout', type=int, default=Notify.EXPIRES_DEFAULT)
 	parser.add_argument('--action', dest='actions', action='append')
 	parser.add_argument('--metadata')
-	parser.add_argument('--replace-id', dest='replaceId', type=int, default=0,
-		help='Replace an existing notification by ID instead of creating a new one')
 	parser.add_argument('--no-wait', dest='noWait', action='store_true',
-		help='Exit immediately after showing the notification (for updateable notifications)')
+		help='Exit immediately after showing the notification')
 	parser.add_argument('--urgency', choices=['low', 'normal', 'critical'],
 		help='Set notification urgency level')
-
 
 	try:
 		args = parser.parse_args()
